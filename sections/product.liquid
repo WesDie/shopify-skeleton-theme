@@ -1,50 +1,451 @@
 {% comment %}
-  This section is used in the product template to render product page with
-  media, content, and add-to-cart form.
+  Enhanced product section with modern design and JavaScript functionality.
+  Features: Image gallery with zoom, variant selection, quantity controls, and AJAX add to cart.
 
   https://shopify.dev/docs/storefronts/themes/architecture/templates/product
 {% endcomment %}
 
-<div class="product-images">
-  {% for image in product.images %}
-    {% render 'image', class: 'product-image', image: image %}
-  {% endfor %}
+{{ 'product.css' | asset_url | stylesheet_tag }}
+{{ 'product-advanced.css' | asset_url | stylesheet_tag }}
+<script src="{{ 'product.js' | asset_url }}" defer></script>
+<script src="{{ 'product-advanced.js' | asset_url }}" defer></script>
+
+<div class="product" data-product-id="{{ product.id }}" data-product-handle="{{ product.handle }}">
+  <!-- Product Images -->
+  <div class="product-media">
+    <div class="product-media__gallery">
+      {% if product.images.size > 0 %}
+        <div class="product-media__main">
+          <!-- Wishlist Button -->
+          <button class="wishlist-btn" aria-label="Add to wishlist">
+            <svg fill="currentColor" viewBox="0 0 20 20">
+              <path fill-rule="evenodd" d="M3.172 5.172a4 4 0 015.656 0L10 6.343l1.172-1.171a4 4 0 115.656 5.656L10 17.657l-6.828-6.829a4 4 0 010-5.656z" clip-rule="evenodd"></path>
+            </svg>
+          </button>
+          
+          {% render 'image', 
+            class: 'product-image', 
+            image: product.featured_image,
+            width: 800,
+            height: 800,
+            loading: 'eager'
+          %}
+        </div>
+        
+        {% if product.images.size > 1 %}
+          <div class="product-media__thumbs">
+            {% for image in product.images %}
+              <div class="product-media__thumb" data-image-index="{{ forloop.index0 }}">
+                {% render 'image', 
+                  class: 'product-thumb', 
+                  image: image,
+                  width: 120,
+                  height: 120
+                %}
+              </div>
+            {% endfor %}
+          </div>
+        {% endif %}
+      {% else %}
+        <div class="product-media__main">
+          <div class="product-image-placeholder">
+            <svg class="placeholder-svg" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect width="120" height="120" fill="#f3f3f3"/>
+              <path d="M30 90L60 60L90 90" stroke="#ccc" stroke-width="2" fill="none"/>
+              <circle cx="45" cy="45" r="8" stroke="#ccc" stroke-width="2" fill="none"/>
+            </svg>
+          </div>
+        </div>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Product Information -->
+  <div class="product-content">
+    <div class="product-info">
+      <h1 class="product-info__title">{{ product.title }}</h1>
+      
+      <div class="product-info__price">
+        {% assign current_variant = product.selected_or_first_available_variant %}
+        
+        <span class="product-info__price-current">
+          {{ current_variant.price | money }}
+        </span>
+        
+        {% if current_variant.compare_at_price > current_variant.price %}
+          <span class="product-info__price-compare">
+            {{ current_variant.compare_at_price | money }}
+          </span>
+          {% assign discount = current_variant.compare_at_price | minus: current_variant.price %}
+          {% assign discount_percent = discount | times: 100 | divided_by: current_variant.compare_at_price %}
+          <span class="product-info__badge">
+            Save {{ discount_percent }}%
+          </span>
+        {% endif %}
+      </div>
+
+      {% if product.description != blank %}
+        <div class="product-info__description">
+          {{ product.description }}
+        </div>
+      {% endif %}
+
+      <!-- Stock Urgency -->
+      <div class="stock-urgency-container"></div>
+    </div>
+
+    <!-- Product Form -->
+    <div class="product-form">
+      {% form 'product', product, class: 'product-form__form' %}
+        <!-- Hidden select for Shopify's cart functionality -->
+        <select name="id" style="display: none;">
+          {% for variant in product.variants %}
+            <option
+              value="{{ variant.id }}"
+              {% if variant == current_variant %}selected="selected"{% endif %}
+            >
+              {{ variant.title }} - {{ variant.price | money }}
+            </option>
+          {% endfor %}
+        </select>
+
+        {% if product.variants.size > 1 %}
+          <div class="product-form__group">
+            <label class="product-form__label">Choose an option:</label>
+            <div class="product-form__variants">
+              {% for variant in product.variants %}
+                <div 
+                  class="variant-option"
+                  data-variant-id="{{ variant.id }}"
+                  data-available="{{ variant.available }}"
+                  data-inventory="{{ variant.inventory_quantity }}"
+                  data-price="{{ variant.price }}"
+                  {% if variant.featured_image %}
+                    data-image="{{ variant.featured_image | image_url: width: 800 }}"
+                  {% endif %}
+                >
+                  <span class="variant-option__title">{{ variant.title }}</span>
+                  <span class="variant-option__price">{{ variant.price | money }}</span>
+                </div>
+              {% endfor %}
+            </div>
+          </div>
+        {% endif %}
+
+        <!-- Quantity Selector -->
+        <div class="product-form__group">
+          <label class="product-form__label" for="quantity">Quantity:</label>
+          <div class="quantity-selector">
+            <button type="button" class="quantity-selector__btn quantity-decrease" aria-label="Decrease quantity">
+              −
+            </button>
+            <input 
+              type="number" 
+              name="quantity" 
+              id="quantity"
+              class="quantity-selector__input" 
+              min="1" 
+              value="1"
+              max="{{ current_variant.inventory_quantity | default: 999 }}"
+            >
+            <button type="button" class="quantity-selector__btn quantity-increase" aria-label="Increase quantity">
+              +
+            </button>
+          </div>
+        </div>
+
+        <!-- Add to Cart Actions -->
+        <div class="product-form__actions">
+          <button 
+            type="submit" 
+            class="btn btn--primary btn--add-to-cart"
+            {% unless current_variant.available %}disabled{% endunless %}
+          >
+            {% if current_variant.available %}
+              Add to cart
+            {% else %}
+              Sold out
+            {% endif %}
+          </button>
+          
+          {{ form | payment_button }}
+        </div>
+      {% endform %}
+    </div>
+
+    <!-- Social Share -->
+    <div class="social-share">
+      <p class="social-share__title">Share this product:</p>
+      <div class="social-share__buttons">
+        <button class="social-share__btn social-share__btn--facebook" data-platform="facebook">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
+          </svg>
+          Facebook
+        </button>
+        
+        <button class="social-share__btn social-share__btn--twitter" data-platform="twitter">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M23.953 4.57a10 10 0 01-2.825.775 4.958 4.958 0 002.163-2.723c-.951.555-2.005.959-3.127 1.184a4.92 4.92 0 00-8.384 4.482C7.69 8.095 4.067 6.13 1.64 3.162a4.822 4.822 0 00-.666 2.475c0 1.71.87 3.213 2.188 4.096a4.904 4.904 0 01-2.228-.616v.06a4.923 4.923 0 003.946 4.827 4.996 4.996 0 01-2.212.085 4.936 4.936 0 004.604 3.417 9.867 9.867 0 01-6.102 2.105c-.39 0-.779-.023-1.17-.067a13.995 13.995 0 007.557 2.209c9.053 0 13.998-7.496 13.998-13.985 0-.21 0-.42-.015-.63A9.935 9.935 0 0024 4.59z"/>
+          </svg>
+          Twitter
+        </button>
+        
+        <button class="social-share__btn social-share__btn--pinterest" data-platform="pinterest">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12.017 0C5.396 0 .029 5.367.029 11.987c0 5.079 3.158 9.417 7.618 11.174-.105-.949-.199-2.403.041-3.439.219-.937 1.406-5.957 1.406-5.957s-.359-.72-.359-1.781c0-1.663.967-2.911 2.168-2.911 1.024 0 1.518.769 1.518 1.688 0 1.029-.653 2.567-.992 3.992-.285 1.193.6 2.165 1.775 2.165 2.128 0 3.768-2.245 3.768-5.487 0-2.861-2.063-4.869-5.008-4.869-3.41 0-5.409 2.562-5.409 5.199 0 1.033.394 2.143.889 2.741.097.118.112.222.085.343-.09.375-.293 1.199-.334 1.363-.053.225-.172.271-.402.165-1.495-.69-2.433-2.878-2.433-4.646 0-3.776 2.748-7.252 7.92-7.252 4.158 0 7.392 2.967 7.392 6.923 0 4.135-2.607 7.462-6.233 7.462-1.214 0-2.357-.629-2.746-1.378l-.747 2.848c-.269 1.045-1.004 2.352-1.498 3.146 1.123.345 2.306.535 3.55.535 6.624 0 11.99-5.367 11.99-11.989C24.007 5.367 18.641.001 12.017.001z"/>
+          </svg>
+          Pinterest
+        </button>
+        
+        <button class="social-share__btn social-share__btn--copy" data-platform="copy">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/>
+          </svg>
+          Copy Link
+        </button>
+      </div>
+    </div>
+
+    <!-- Product Features -->
+    <div class="product-features">
+      <div class="product-feature">
+        <svg class="product-feature__icon" fill="currentColor" viewBox="0 0 20 20">
+          <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path>
+        </svg>
+        <span class="product-feature__text">Free shipping on orders over $50</span>
+      </div>
+      
+      <div class="product-feature">
+        <svg class="product-feature__icon" fill="currentColor" viewBox="0 0 20 20">
+          <path fill-rule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clip-rule="evenodd"></path>
+        </svg>
+        <span class="product-feature__text">30-day return policy</span>
+      </div>
+      
+      <div class="product-feature">
+        <svg class="product-feature__icon" fill="currentColor" viewBox="0 0 20 20">
+          <path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd"></path>
+        </svg>
+        <span class="product-feature__text">Secure checkout</span>
+      </div>
+    </div>
+  </div>
 </div>
 
-<div class="product-info">
-  <h1>{{ product.title }}</h1>
-  <p>{{ product.price | money }}</p>
-  <p>{{ product.description }}</p>
+<!-- Product Tabs Section -->
+<div class="product-tabs">
+  <nav class="product-tabs__nav">
+    <button class="product-tabs__tab active" data-tab="description">Description</button>
+    <button class="product-tabs__tab" data-tab="reviews">Reviews</button>
+    <button class="product-tabs__tab" data-tab="shipping">Shipping & Returns</button>
+    <button class="product-tabs__tab" data-tab="size-guide">Size Guide</button>
+  </nav>
+  
+  <div class="product-tabs__content">
+    <!-- Description Tab -->
+    <div id="description" class="product-tabs__panel active">
+      {% if product.description != blank %}
+        <div class="rte">
+          {{ product.description }}
+        </div>
+      {% else %}
+        <p>No description available for this product.</p>
+      {% endif %}
+      
+      {% if product.metafields.custom.specifications %}
+        <h3>Specifications</h3>
+        <div class="product-specifications">
+          {{ product.metafields.custom.specifications }}
+        </div>
+      {% endif %}
+    </div>
+    
+    <!-- Reviews Tab -->
+    <div id="reviews" class="product-tabs__panel">
+      <div class="product-reviews">
+        <div class="reviews-summary">
+          <div class="reviews-summary__rating">
+            <div class="reviews-summary__stars">
+              <svg class="star" fill="currentColor" viewBox="0 0 20 20">
+                <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"></path>
+              </svg>
+              <svg class="star" fill="currentColor" viewBox="0 0 20 20">
+                <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"></path>
+              </svg>
+              <svg class="star" fill="currentColor" viewBox="0 0 20 20">
+                <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"></path>
+              </svg>
+              <svg class="star" fill="currentColor" viewBox="0 0 20 20">
+                <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"></path>
+              </svg>
+              <svg class="star star--empty" fill="currentColor" viewBox="0 0 20 20">
+                <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"></path>
+              </svg>
+            </div>
+            <span class="reviews-summary__score">4.2</span>
+            <span class="reviews-summary__count">Based on 127 reviews</span>
+          </div>
+        </div>
+        
+        <!-- Sample Reviews -->
+        <div class="review-item">
+          <div class="review-header">
+            <span class="review-author">Sarah M.</span>
+            <span class="review-date">2 weeks ago</span>
+          </div>
+          <div class="review-rating">
+            <svg class="star" fill="currentColor" viewBox="0 0 20 20">
+              <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"></path>
+            </svg>
+            <svg class="star" fill="currentColor" viewBox="0 0 20 20">
+              <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"></path>
+            </svg>
+            <svg class="star" fill="currentColor" viewBox="0 0 20 20">
+              <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"></path>
+            </svg>
+            <svg class="star" fill="currentColor" viewBox="0 0 20 20">
+              <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"></path>
+            </svg>
+            <svg class="star" fill="currentColor" viewBox="0 0 20 20">
+              <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"></path>
+            </svg>
+          </div>
+          <p class="review-content">Love this product! Great quality and exactly as described. Fast shipping too.</p>
+        </div>
+        
+        <div class="review-item">
+          <div class="review-header">
+            <span class="review-author">Mike T.</span>
+            <span class="review-date">1 month ago</span>
+          </div>
+          <div class="review-rating">
+            <svg class="star" fill="currentColor" viewBox="0 0 20 20">
+              <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"></path>
+            </svg>
+            <svg class="star" fill="currentColor" viewBox="0 0 20 20">
+              <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"></path>
+            </svg>
+            <svg class="star" fill="currentColor" viewBox="0 0 20 20">
+              <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"></path>
+            </svg>
+            <svg class="star" fill="currentColor" viewBox="0 0 20 20">
+              <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"></path>
+            </svg>
+            <svg class="star star--empty" fill="currentColor" viewBox="0 0 20 20">
+              <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"></path>
+            </svg>
+          </div>
+          <p class="review-content">Good product overall. Fits well and comfortable. Would recommend to others.</p>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Shipping Tab -->
+    <div id="shipping" class="product-tabs__panel">
+      <h3>Shipping Information</h3>
+      <ul>
+        <li>Free standard shipping on orders over $50</li>
+        <li>Express shipping available for $9.99</li>
+        <li>International shipping available</li>
+        <li>Orders processed within 1-2 business days</li>
+      </ul>
+      
+      <h3>Return Policy</h3>
+      <ul>
+        <li>30-day return window</li>
+        <li>Items must be unused and in original packaging</li>
+        <li>Free returns on defective items</li>
+        <li>Return shipping fees may apply</li>
+      </ul>
+    </div>
+    
+    <!-- Size Guide Tab -->
+    <div id="size-guide" class="product-tabs__panel">
+      <h3>Size Guide</h3>
+      <p>Use this guide to find your perfect fit:</p>
+      
+      <table class="size-guide-table">
+        <thead>
+          <tr>
+            <th>Size</th>
+            <th>Chest (inches)</th>
+            <th>Waist (inches)</th>
+            <th>Length (inches)</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Small</td>
+            <td>34-36</td>
+            <td>28-30</td>
+            <td>27</td>
+          </tr>
+          <tr>
+            <td>Medium</td>
+            <td>38-40</td>
+            <td>32-34</td>
+            <td>28</td>
+          </tr>
+          <tr>
+            <td>Large</td>
+            <td>42-44</td>
+            <td>36-38</td>
+            <td>29</td>
+          </tr>
+          <tr>
+            <td>X-Large</td>
+            <td>46-48</td>
+            <td>40-42</td>
+            <td>30</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
 </div>
 
-<div class="product-form">
-  {% form 'product', product %}
-    {% assign current_variant = product.selected_or_first_available_variant %}
+<!-- Recently Viewed Products -->
+<section class="recently-viewed">
+  <h2 class="recently-viewed__title">Recently Viewed</h2>
+  <div class="recently-viewed__grid"></div>
+</section>
 
-    <select name="id">
-      {% for variant in product.variants %}
-        <option
-          value="{{ variant.id }}"
-          {% if variant == current_variant %}
-            selected="selected"
-          {% endif %}
-        >
-          {{ variant.title }} - {{ variant.price | money }}
-        </option>
-      {% endfor %}
-    </select>
-
-    <input type="text" name="quantity" min="1" value="1">
-
-    <input type="submit" value="Add to cart">
-    {{ form | payment_button }}
-  {% endform %}
-</div>
+<!-- Product Recommendations -->
+<section class="product-recommendations">
+  <h2 class="product-recommendations__title">You might also like</h2>
+  <div class="product-recommendations__grid"></div>
+</section>
 
 {% schema %}
 {
   "name": "t:general.product",
-  "settings": [],
+  "settings": [
+    {
+      "type": "checkbox",
+      "id": "show_vendor",
+      "label": "Show vendor",
+      "default": true
+    },
+    {
+      "type": "checkbox",
+      "id": "show_sku",
+      "label": "Show SKU",
+      "default": false
+    },
+    {
+      "type": "checkbox",
+      "id": "enable_zoom",
+      "label": "Enable image zoom",
+      "default": true
+    },
+    {
+      "type": "checkbox",
+      "id": "enable_video",
+      "label": "Enable product videos",
+      "default": true
+    }
+  ],
   "disabled_on": {
     "groups": ["header", "footer"]
   }
